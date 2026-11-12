@@ -67,8 +67,12 @@ def main():
     ap.add_argument('--seed0', type=int, default=7000)
     ap.add_argument('--max-attempts', type=int, default=3)
     ap.add_argument('--scenario', default='leakfree',
-                    choices=['ideal', 'mismatch', 'leakfree'])
+                    choices=['ideal', 'mismatch', 'leakfree', 'severe'])
     ap.add_argument('--out', default=None)
+    ap.add_argument('--learners', nargs='+',
+                    default=['rl', 'rl_decay', 'rl_initonly', 'rl_no_ode'])
+    ap.add_argument('--no-baselines', action='store_true',
+                    help='skip rl_untrained, ode and rand (e.g. when adding a learner)')
     args = ap.parse_args()
     if args.out is None:
         args.out = os.path.join(os.path.dirname(__file__), 'out',
@@ -82,7 +86,7 @@ def main():
           f'-> eval={len(eval_seeds)} held-out seeds\n')
 
     results = {}
-    for name in ('rl', 'rl_decay', 'rl_initonly', 'rl_no_ode'):
+    for name in args.learners:
         pol = freeze(train_policy(name, train_seeds, scenario=args.scenario,
                                   max_attempts=args.max_attempts))
         results[f'{name}_trained'] = eval_records(
@@ -90,23 +94,26 @@ def main():
         print(f'  {name}_trained (|Q|={pol.q_size()} entries)')
 
     # Untrained ODE-biased agent: greedy from the optimistic prior, no learning.
-    results['rl_untrained'] = eval_records(
-        freeze(Policy('rl')), eval_seeds, scenario=args.scenario,
-        max_attempts=args.max_attempts)
-    for name in ('ode', 'rand'):
-        results[name] = eval_records(name, eval_seeds, scenario=args.scenario,
-                                     max_attempts=args.max_attempts)
+    if not args.no_baselines:
+        results['rl_untrained'] = eval_records(
+            freeze(Policy('rl')), eval_seeds, scenario=args.scenario,
+            max_attempts=args.max_attempts)
+        for name in ('ode', 'rand'):
+            results[name] = eval_records(name, eval_seeds, scenario=args.scenario,
+                                         max_attempts=args.max_attempts)
 
     for k, s in results.items():
         with open(os.path.join(args.out, f'{k}_summary.json'), 'w') as f:
             json.dump(s, f, indent=2)
 
-    order = ['rl_trained', 'rl_decay_trained', 'rl_initonly_trained',
-             'rl_no_ode_trained', 'rl_untrained', 'ode', 'rand']
+    order = [k for k in ['rl_trained', 'rl_decay_trained', 'rl_initonly_trained',
+                         'rl_flat_trained', 'rl_no_ode_trained', 'rl_untrained', 'ode', 'rand']
+             if k in results]
     lab = {'rl_trained': 'RL trained (fixed beta)',
            'rl_decay_trained': 'RL trained (decaying beta)',
            'rl_initonly_trained': 'RL trained (init-only, unif expl)',
            'rl_no_ode_trained': 'RL\\ODE trained',
+           'rl_flat_trained': 'RL trained (flat optimism)',
            'rl_untrained': 'RL untrained (= ODE prior)',
            'ode': 'ODE-only', 'rand': 'Random'}
 
@@ -139,10 +146,13 @@ def main():
         return (f'  {lab[a_key]} {rel} {lab[b_key]}  '
                 f'({a["f1_macro"]:.3f} vs {b["f1_macro"]:.3f})')
 
-    print('\nAgainst the unbiased ablation:')
-    for k in ('rl_initonly_trained', 'rl_decay_trained', 'rl_trained'):
-        print(contrast(k, 'rl_no_ode_trained'))
-    print(contrast('rl_initonly_trained', 'ode'))
+    if 'rl_no_ode_trained' in results:
+        print('\nAgainst the unbiased ablation:')
+        for k in ('rl_initonly_trained', 'rl_decay_trained', 'rl_trained', 'rl_flat_trained'):
+            if k in results:
+                print(contrast(k, 'rl_no_ode_trained'))
+    if 'rl_initonly_trained' in results and 'ode' in results:
+        print(contrast('rl_initonly_trained', 'ode'))
     print(f'\nWrote summaries under: {args.out}')
 
 

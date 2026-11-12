@@ -221,3 +221,9 @@ __marimo__/
 out/
 img/
 *.jsonl
+
+# v12 outputs
+out_v12/
+img_v12/
+tex_v12/
+paper/

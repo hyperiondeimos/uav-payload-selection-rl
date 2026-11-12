@@ -12,9 +12,10 @@ best sensor in the fleet for that characteristic. Observed coverage adds
 N(0, 0.10) noise and is thresholded into the four outcome classes.
 
 Scenarios:
-  ideal     detection uses the prior S (prior equals ground truth)
+  ideal     detection uses the prior S (prior equals ground truth; 'aligned')
   mismatch  the thermal row of S is halved at detection time only
   leakfree  detection uses S_REAL, structurally decoupled from the prior
+  severe    leakfree with thermal at 25% of the datasheet and LiDAR theta4 0.9 -> 0.5
 """
 import numpy as np
 
@@ -26,6 +27,10 @@ HOME = (0.0, 0.0)
 DET_NOISE_STD = 0.10
 SCOUT_CONF_NOISE = 0.05
 PHASE1_SENSORS = (1, 4)   # RGB + LiDAR
+import os as _os
+# The phase is part of the state (default). FIX_PHASE=0 reproduces the v11 code,
+# where phase-1 and phase-2 actions shared Q-table entries.
+FIX_PHASE = _os.environ.get('FIX_PHASE', '1') == '1'
 
 # Reality under the leakfree scenario. The planner keeps believing S_PRIOR.
 # Every anomaly stays solvable, but the prior's argmax-utility payload is no
@@ -37,7 +42,14 @@ S_REAL[2, 0] = 0.85       # Hyperspectral under-valued by the prior on theta1
 S_REAL[4, :] *= 0.5       # thermal row halved
 
 
+S_SEVERE = S_REAL.copy()
+S_SEVERE[4, :] = S_PRIOR[4, :] * 0.25   # thermal nearly blind (heavy humidity)
+S_SEVERE[3, 3] = 0.50                    # LiDAR degraded under dense canopy
+
+
 def detection_matrix(scenario):
+    if scenario == 'severe':
+        return S_SEVERE.copy()
     if scenario == 'ideal':
         return S_PRIOR.copy()
     if scenario == 'mismatch':
@@ -100,7 +112,7 @@ def run_mission(cluster, policy, scenario, s_det, rng, mission_no, attempts_prev
     anom_id = cluster['anomaly_id']
     distance_m = cluster['distance_m']
     conf = scout_confidence(anom_id, rng)
-    all_actions = build_action_space(distance_m)
+    all_actions = build_action_space(distance_m, anom_id)
     records = []
     resolved = False
 
@@ -109,6 +121,8 @@ def run_mission(cluster, policy, scenario, s_det, rng, mission_no, attempts_prev
         if not actions:
             continue
         s_key = state_key(anom_id, conf, distance_m, attempts_prev)
+        if FIX_PHASE:
+            s_key = s_key + (phase_num,)
         eps_at_select = policy.epsilon
         q_at_select = policy.q_size()
         a = policy.select(s_key, actions, rng)

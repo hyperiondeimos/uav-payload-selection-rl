@@ -18,7 +18,8 @@ POLICIES = ['rl', 'rl_decay', 'ode', 'rand', 'rl_no_ode']
 SCENARIOS = ['ideal', 'mismatch']
 LABELS = {'rl': 'RL (fixed beta)', 'rl_decay': 'RL (decaying beta)',
           'ode': 'ODE-only (deterministic)', 'rand': 'Random',
-          'rl_no_ode': 'RL\\ODE (ablation)', 'full': 'Full-payload'}
+          'rl_no_ode': 'RL\\ODE (ablation)', 'full': 'Full-payload', 'rl_initonly': 'RL init-only',
+          'rl_flat': 'RL flat optimism'}
 
 
 def cluster_at_k(records, kmax=3):
@@ -53,7 +54,7 @@ def run_policy(policy, scenario, seeds, max_attempts, transfer=False):
     # With transfer a single policy object is reused across seeds, so epsilon
     # decays campaign-wide and the Q-table accumulates.
     shared = Policy(policy) if (transfer and policy in (
-        'rl', 'rl_decay', 'rl_initonly', 'rl_no_ode')) else None
+        'rl', 'rl_decay', 'rl_initonly', 'rl_no_ode', 'rl_flat')) else None
     for seed in seeds:
         recs, msum = run_seed(seed, shared if shared is not None else policy,
                               scenario, max_attempts=max_attempts)

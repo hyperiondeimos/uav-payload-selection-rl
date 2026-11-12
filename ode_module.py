@@ -113,12 +113,49 @@ def all_combinations(distance_m):
     return results
 
 
-def utility_vector(distance_m, criterion='D'):
+import os as _os
+# Prior criterion. 'det' = det F over all six characteristics (v11 code; collapses
+# to zero whenever one column is uncovered), 'logdet' = log det(eps I + F) over all
+# six (task-agnostic but well-posed), 'anom' = log det(eps I + F[Th_a, Th_a]) over
+# the anomaly's characteristics (default). FIX_UTIL=1/0 is kept as an alias of
+# 'anom'/'det' for the advisor's patch; PRIOR_MODE takes precedence.
+if 'PRIOR_MODE' in _os.environ:
+    PRIOR_MODE = _os.environ['PRIOR_MODE']
+elif 'FIX_UTIL' in _os.environ:
+    PRIOR_MODE = 'anom' if _os.environ['FIX_UTIL'] == '1' else 'det'
+else:
+    PRIOR_MODE = 'anom'
+if PRIOR_MODE not in ('det', 'logdet', 'anom'):
+    raise ValueError(f'PRIOR_MODE must be det, logdet or anom, got {PRIOR_MODE!r}')
+FIX_UTIL = PRIOR_MODE == 'anom'
+EPS_PRIOR = float(_os.environ.get('EPS_PRIOR', '1e-2'))
+
+
+def criterion_logdet_global(F, eps=None):
+    """log det of the regularised full FIM (task-agnostic D-optimality)."""
+    eps = EPS_PRIOR if eps is None else eps
+    return float(np.linalg.slogdet(F + eps * np.eye(F.shape[0]))[1])
+
+
+def criterion_logdet_anom(F, anomaly_id, eps=None):
+    """log det of the regularised FIM block of the anomaly's characteristics."""
+    eps = EPS_PRIOR if eps is None else eps
+    th = [t - 1 for t in ANOMALIES[anomaly_id]['theta']]
+    Fa = F[np.ix_(th, th)] + eps * np.eye(len(th))
+    return float(np.linalg.slogdet(Fa)[1])
+
+
+def utility_vector(distance_m, criterion='D', anomaly_id=None):
     """Min-max normalised D-optimal utility over the feasible subsets."""
     combos = all_combinations(distance_m)
     if not combos:
         return [], np.array([])
-    phi_vals = np.array([c['phi_D'] for c in combos], dtype=np.float64)
+    if FIX_UTIL and anomaly_id is not None:
+        phi_vals = np.array([criterion_logdet_anom(c['fim'], anomaly_id) for c in combos])
+    elif PRIOR_MODE == 'logdet':
+        phi_vals = np.array([criterion_logdet_global(c['fim']) for c in combos])
+    else:
+        phi_vals = np.array([c['phi_D'] for c in combos], dtype=np.float64)
     phi_min, phi_max = phi_vals.min(), phi_vals.max()
     if phi_max - phi_min < 1e-12:
         u = np.ones(len(combos))

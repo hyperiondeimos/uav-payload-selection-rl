@@ -6,6 +6,8 @@ Policies:
   rl_decay    same, with beta and the exploration mix decaying per episode
   rl_initonly optimistic init with uniform exploration
   rl_no_ode   ablation: Q0 = 0, uniform exploration
+  rl_flat     control: Q0 = beta for every action (optimism without the
+              prior's ranking), uniform exploration
   ode         deterministic argmax of the D-optimal utility, no learning
   rand        uniform random over feasible actions
   full        full-payload baseline: most sensors, then heaviest
@@ -89,9 +91,9 @@ def state_key(anomaly_id, confidence, distance_m, n_attempts):
             _attempt_bin(n_attempts))
 
 
-def build_action_space(distance_m):
+def build_action_space(distance_m, anomaly_id=None):
     """Every feasible (sensor subset, drone count) pair for a given distance."""
-    combos, u = utility_vector(distance_m, criterion='D')
+    combos, u = utility_vector(distance_m, criterion='D', anomaly_id=anomaly_id)
     actions = []
     for i, combo in enumerate(combos):
         sensors = combo['sensors']
@@ -123,8 +125,9 @@ class QLearningAgent:
     exploration is steered by softmax(u); both knobs are independent so the
     initialization can be biased without biasing the exploration."""
 
-    def __init__(self, ode_bias=True, bias_decay=1.0, bias_explore=None):
+    def __init__(self, ode_bias=True, bias_decay=1.0, bias_explore=None, flat=False):
         self.ode_bias = ode_bias
+        self.flat = flat
         self.bias_explore = ode_bias if bias_explore is None else bias_explore
         self.eta = ETA
         self.beta = BETA
@@ -141,7 +144,9 @@ class QLearningAgent:
         key = (s_key, a['idx'])
         if key in self.Q:
             return self.Q[key]
-        return self.bias * a['utility'] if self.ode_bias else 0.0
+        if not self.ode_bias:
+            return 0.0
+        return self.bias * (1.0 if self.flat else a['utility'])
 
     def select_action(self, s_key, actions, rng):
         if not actions:
@@ -192,6 +197,9 @@ class Policy:
                                         bias_explore=False)
         elif name == 'rl_no_ode':
             self.agent = QLearningAgent(ode_bias=False)
+        elif name == 'rl_flat':
+            self.agent = QLearningAgent(ode_bias=True, bias_decay=1.0,
+                                        bias_explore=False, flat=True)
         else:
             self.agent = None     # 'ode', 'rand' and 'full' are stateless
 
@@ -207,7 +215,7 @@ class Policy:
         return self.agent.q_size() if self.agent else 0
 
     def select(self, s_key, actions, rng):
-        if self.name in ('rl', 'rl_decay', 'rl_initonly', 'rl_no_ode'):
+        if self.name in ('rl', 'rl_decay', 'rl_initonly', 'rl_no_ode', 'rl_flat'):
             return self.agent.select_action(s_key, actions, rng)
         if self.name == 'ode':
             return max(actions, key=lambda a: a['utility'])
