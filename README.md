@@ -20,7 +20,8 @@ pip install -r requirements.txt
 ```
 
 Python 3.10+ and NumPy run the experiments; matplotlib and seaborn are only
-needed for the figures.
+needed for the figures. The numbers reported in the manuscript were produced
+with Python 3.12.10 and NumPy 2.4.6.
 
 ## Reproducing the paper
 
